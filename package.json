@@ -5,20 +5,18 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@discordjs/rest": "^2.6.0",
-    "@sparticuz/chromium": "^143.0.0",
     "@types/node": "^22.13.11",
     "discord.js": "^14.25.1",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "node-fetch": "^3.3.2",
-    "puppeteer": "^24.32.0",
-    "puppeteer-core": "^24.32.0"
+    "puppeteer": "^24.32.0"
   }
 }
