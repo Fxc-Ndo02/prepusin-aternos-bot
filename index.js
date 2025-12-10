@@ -84,23 +84,37 @@ async function launchBrowser() {
   });
 }
 
-// Función común para loguearse
+// Función común para loguearse (¡CORRECCIÓN APLICADA AQUÍ!)
 async function loginAternos(page) {
-  // Timeout de 2 minutos porque Aternos es lento y Render a veces también
+  // Timeout de 2 minutos para la navegación (ya lo tenías)
   page.setDefaultNavigationTimeout(120000); 
 
   console.log("🔑 Entrando al login...");
   await page.goto("https://aternos.org/go/", { waitUntil: "domcontentloaded" });
 
-  // Esperar y llenar usuario
-  await page.waitForSelector("#login input[name='username']", { visible: true });
-  await page.type("#login input[name='username']", process.env.ATERNOS_EMAIL);
+  // *** CORRECCIÓN DEL TIMEOUT: Esperamos 60 segundos por el formulario ***
+  const loginSelector = "#login input[name='username']";
+  
+  try {
+    // Aumentamos el timeout específico del selector a 60 segundos para Render/Aternos
+    await page.waitForSelector(loginSelector, { 
+        visible: true, 
+        timeout: 60000 
+    });
+  } catch (error) {
+      // Lanzamos un error más descriptivo si falla el selector
+      throw new Error(`Timeout al buscar el formulario de Aternos: ${error.message}`);
+  }
+
+
+  console.log("Ingresando credenciales...");
+  await page.type(loginSelector, process.env.ATERNOS_EMAIL);
   await page.type("#login input[name='password']", process.env.ATERNOS_PASSWORD);
 
   console.log("📤 Enviando formulario...");
   await page.click("#login button[type='submit']");
 
-  // Esperar a que cargue la siguiente página
+  // Esperar navegación post-login
   await page.waitForNavigation({ waitUntil: "domcontentloaded" });
 
   console.log("🌐 Navegando al panel del servidor...");
@@ -111,6 +125,7 @@ async function loginAternos(page) {
   // Pequeña espera extra para asegurar carga de elementos dinámicos
   await new Promise(r => setTimeout(r, 2000));
 }
+
 
 // Acción: START
 async function startServer() {
@@ -216,6 +231,7 @@ client.on("interactionCreate", async (interaction) => {
   try {
     switch (interaction.commandName) {
       case "estado":
+        await interaction.editReply("📡 **Intentando obtener estado...** (Esto toma unos segundos en verificar)");
         const state = await checkServerState();
         let emoji = state.status.toLowerCase().includes("offline") ? "🔴" : "🟢";
         if (state.status.toLowerCase().includes("starting")) emoji = "⏳";
@@ -224,8 +240,7 @@ client.on("interactionCreate", async (interaction) => {
         break;
 
       case "jugadores":
-        // Aternos no muestra jugadores fácilmente sin prenderlo y hacer scrape complejo
-        // Por ahora devolvemos lo guardado o un mensaje genérico
+        // Simulado
         await interaction.editReply(`👥 **Jugadores:** ${players} (Solo visible si el servidor reporta query)`);
         break;
 
@@ -251,7 +266,7 @@ client.on("interactionCreate", async (interaction) => {
     }
   } catch (error) {
     console.error(error);
-    await interaction.editReply("❌ **Error crítico:** Algo falló al intentar conectar con Aternos. Revisa la consola de Render.");
+    await interaction.editReply(`❌ **Error crítico:** Algo falló al intentar conectar con Aternos.\nDetalles: ${error.message.substring(0, 100)}... Revisa la consola de Render.`);
   }
 });
 
