@@ -72,7 +72,7 @@ const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 async function launchBrowser() {
   console.log("🚀 Lanzando navegador...");
   return await puppeteer.launch({
-    headless: true, // "new" está obsoleto, usa true
+    headless: true,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -84,9 +84,9 @@ async function launchBrowser() {
   });
 }
 
-// Función común para loguearse (¡CORRECCIÓN APLICADA AQUÍ!)
+// Función común para loguearse (¡TIMEOUT A 60 SEGUNDOS!)
 async function loginAternos(page) {
-  // Timeout de 2 minutos para la navegación (ya lo tenías)
+  // Timeout de 2 minutos para la navegación
   page.setDefaultNavigationTimeout(120000); 
 
   console.log("🔑 Entrando al login...");
@@ -96,16 +96,16 @@ async function loginAternos(page) {
   const loginSelector = "#login input[name='username']";
   
   try {
-    // Aumentamos el timeout específico del selector a 60 segundos para Render/Aternos
+    // Aumentamos el timeout específico del selector a 60 segundos 
     await page.waitForSelector(loginSelector, { 
         visible: true, 
-        timeout: 60000 
+        timeout: 60000 // A 60 segundos
     });
+    console.log("✅ Selector de login encontrado. Procediendo a loguear...");
   } catch (error) {
-      // Lanzamos un error más descriptivo si falla el selector
-      throw new Error(`Timeout al buscar el formulario de Aternos: ${error.message}`);
+      // Lanzamos un error que mostrará el nuevo timeout en caso de fallo
+      throw new Error(`Timeout al buscar el formulario de Aternos (60s): ${error.message}`);
   }
-
 
   console.log("Ingresando credenciales...");
   await page.type(loginSelector, process.env.ATERNOS_EMAIL);
@@ -224,11 +224,10 @@ async function checkServerState() {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
-  // IMPORTANTE: deferReply evita el error "Unknown interaction"
-  // Le da al bot 15 minutos para responder en lugar de 3 segundos
-  await interaction.deferReply(); 
-
   try {
+    // ESTA LÍNEA DEBE SER LA PRIMERA EN EL BLOQUE TRY para evitar el Unknown interaction
+    await interaction.deferReply(); 
+
     switch (interaction.commandName) {
       case "estado":
         await interaction.editReply("📡 **Intentando obtener estado...** (Esto toma unos segundos en verificar)");
@@ -266,6 +265,7 @@ client.on("interactionCreate", async (interaction) => {
     }
   } catch (error) {
     console.error(error);
+    // Mostrar un error más específico para el usuario
     await interaction.editReply(`❌ **Error crítico:** Algo falló al intentar conectar con Aternos.\nDetalles: ${error.message.substring(0, 100)}... Revisa la consola de Render.`);
   }
 });
