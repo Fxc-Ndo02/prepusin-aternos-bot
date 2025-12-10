@@ -7,11 +7,17 @@ import {
 } from "discord.js";
 import express from "express";
 import dotenv from "dotenv";
-import puppeteer from "puppeteer";
+
+// IMPORTANTE: Usamos la versión 'extra' para camuflaje
+import puppeteer from "puppeteer-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
+
+// Activamos el camuflaje para engañar a Aternos/Cloudflare
+puppeteer.use(StealthPlugin());
 
 dotenv.config();
 
-// -------------------- 1. SERVIDOR WEB (Para mantener activo en Render) --------------------
+// -------------------- 1. SERVIDOR WEB --------------------
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -29,27 +35,15 @@ const client = new Client({
   ],
 });
 
-// Variables globales simples
-let serverIP = "mc.micholandt1.aternos.me"; // Pon tu IP aquí por defecto
+let serverIP = "mc.micholandt1.aternos.me"; 
 let players = "Desconocido";
 
 // -------------------- 3. SLASH COMMANDS --------------------
 const commands = [
-  new SlashCommandBuilder()
-    .setName("estado")
-    .setDescription("Muestra si el servidor está ON u OFF"),
-
-  new SlashCommandBuilder()
-    .setName("jugadores")
-    .setDescription("Muestra jugadores conectados (simulado)"),
-
-  new SlashCommandBuilder()
-    .setName("start")
-    .setDescription("Inicia el servidor Aternos"),
-
-  new SlashCommandBuilder()
-    .setName("stop")
-    .setDescription("Apaga el servidor Aternos"),
+  new SlashCommandBuilder().setName("estado").setDescription("Muestra si el servidor está ON u OFF"),
+  new SlashCommandBuilder().setName("jugadores").setDescription("Muestra jugadores conectados"),
+  new SlashCommandBuilder().setName("start").setDescription("Inicia el servidor Aternos"),
+  new SlashCommandBuilder().setName("stop").setDescription("Apaga el servidor Aternos"),
 ];
 
 const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
@@ -66,70 +60,65 @@ const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
   }
 })();
 
-// -------------------- 4. FUNCIONES PUPPETEER --------------------
+// -------------------- 4. FUNCIONES PUPPETEER (SIGILO) --------------------
 
-// Configuración para lanzar el navegador en Render
 async function launchBrowser() {
-  console.log("🚀 Lanzando navegador...");
+  console.log("🚀 Lanzando navegador en modo SIGILO...");
   return await puppeteer.launch({
-    headless: true,
+    headless: true, // Debe ser true en Render
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
       "--disable-gpu",
-      "--single-process", 
+      "--single-process",
       "--no-zygote",
+      "--window-size=1920,1080", // Ventana grande para parecer humano
     ],
   });
 }
 
-// Función común para loguearse (¡SELECTORES ACTUALIZADOS DE ATERNOS!)
 async function loginAternos(page) {
-    // Timeout de 2 minutos para la navegación
-    page.setDefaultNavigationTimeout(120000); 
+  // 1. Disfrazar el User Agent (parecer un usuario de Windows)
+  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36');
+  
+  page.setDefaultNavigationTimeout(120000); 
 
-    console.log("🔑 Entrando al login de Aternos...");
-    await page.goto("https://aternos.org/go/", { waitUntil: "domcontentloaded" });
+  console.log("🔑 Navegando a Aternos...");
+  await page.goto("https://aternos.org/go/", { waitUntil: "networkidle2" });
 
-    // --- NUEVOS SELECTORES DE ATERNOS (Basado en la inspección de tu navegador) ---
-    const usernameSelector = "input.username"; 
-    const passwordSelector = "input[type='password']"; 
-    const submitButtonSelector = "#login button[type='submit']";
+  // Selectores actualizados
+  const usernameSelector = "input.username"; 
+  const passwordSelector = "input[type='password']"; 
+  const submitButtonSelector = "#login button[type='submit']";
+  
+  try {
+    // Esperamos 60s. El plugin Stealth debería evitar el bloqueo inmediato
+    await page.waitForSelector(usernameSelector, { visible: true, timeout: 60000 });
+    console.log("✅ Login detectado. Escribiendo credenciales...");
     
-    try {
-        // Intentamos encontrar el nuevo campo de usuario con un tiempo de 60 segundos
-        await page.waitForSelector(usernameSelector, { 
-            visible: true, 
-            timeout: 60000 
-        });
-        
-        console.log("✅ Formulario encontrado. Logueando...");
-        
-        // Ingresando usuario y contraseña con los nuevos selectores
-        await page.type(usernameSelector, process.env.ATERNOS_EMAIL);
-        await page.type(passwordSelector, process.env.ATERNOS_PASSWORD);
+    // Escribir lento (delay) para parecer humano
+    await page.type(usernameSelector, process.env.ATERNOS_EMAIL, { delay: 100 });
+    await page.type(passwordSelector, process.env.ATERNOS_PASSWORD, { delay: 100 });
 
-        console.log("📤 Enviando formulario...");
-        await page.click(submitButtonSelector);
+    console.log("📤 Click en entrar...");
+    await page.click(submitButtonSelector);
 
-    } catch (error) {
-        // Si falla el selector ahora, es casi seguro un bloqueo de Captcha o un cambio adicional de Aternos.
-        throw new Error(`Fallo de Login: Timeout (60s). El selector '${usernameSelector}' no fue encontrado. Posible CAPTCHA.`);
-    }
+  } catch (error) {
+    // Si falla, obtenemos el título para saber si nos bloquearon
+    const pageTitle = await page.title();
+    throw new Error(`Fallo Login (60s). Título de la página: '${pageTitle}'. Aternos está bloqueando la conexión.`);
+  }
 
-    // Esperar navegación post-login
-    await page.waitForNavigation({ waitUntil: "domcontentloaded" });
+  // Esperar a que cargue el dashboard
+  await page.waitForNavigation({ waitUntil: "networkidle2" });
 
-    console.log("🌐 Navegando al panel del servidor...");
-    await page.goto(`https://aternos.org/server/${process.env.SERVER_ID}/`, {
-        waitUntil: "domcontentloaded",
-    });
-    
-    // Pequeña espera extra
-    await new Promise(r => setTimeout(r, 2000));
+  console.log("🌐 Entrando al servidor...");
+  // Navegación directa al servidor específico
+  await page.goto(`https://aternos.org/server/${process.env.SERVER_ID}/`, {
+    waitUntil: "networkidle2",
+  });
 }
-
 
 // Acción: START
 async function startServer() {
@@ -139,33 +128,31 @@ async function startServer() {
     const page = await browser.newPage();
     await loginAternos(page);
 
-    // Intentar encontrar botón de inicio
+    // Buscamos botón START
     const startBtn = await page.$("#start"); 
     
     if (!startBtn) {
-      console.log("⚠️ No veo el botón START. ¿Quizás ya está encendido?");
+      console.log("⚠️ No veo el botón START (¿Ya encendido o selector cambió?).");
       await browser.close();
-      return false; // Retorna falso si no pudo hacer click
+      return false; 
     }
 
     console.log("✅ Clic en START");
     await startBtn.click();
 
-    // Esperar confirmación de cola si aparece
+    // Confirmación de cola (A veces sale un popup)
     try {
         await page.waitForSelector("#confirm", { timeout: 5000 });
         console.log("⚠️ Cola detectada, confirmando...");
         await page.click("#confirm");
-    } catch (e) {
-        // No hubo cola, seguimos
-    }
+    } catch (e) {}
 
     await browser.close();
-    return true; // Retorna verdadero si hizo click
+    return true; 
   } catch (err) {
     console.error("❌ Error en startServer:", err);
     if (browser) await browser.close();
-    throw err; // Lanza el error para que el bot avise
+    throw err; 
   }
 }
 
@@ -180,7 +167,7 @@ async function stopServer() {
     const stopBtn = await page.$("#stop"); 
     
     if (!stopBtn) {
-      console.log("⚠️ No veo el botón STOP. ¿Quizás ya está apagado?");
+      console.log("⚠️ No veo el botón STOP.");
       await browser.close();
       return false;
     }
@@ -196,7 +183,7 @@ async function stopServer() {
   }
 }
 
-// Acción: ESTADO (Checkear si está on/off)
+// Acción: ESTADO
 async function checkServerState() {
   let browser = null;
   try {
@@ -204,15 +191,10 @@ async function checkServerState() {
     const page = await browser.newPage();
     await loginAternos(page);
 
-    // Buscamos el estado en el texto de la página
     const statusElement = await page.$(".server-status-label");
     let status = "Desconocido";
+    if (statusElement) status = await page.evaluate(el => el.innerText, statusElement);
     
-    if (statusElement) {
-        status = await page.evaluate(el => el.innerText, statusElement);
-    }
-    
-    // Si vemos el botón de STOP, es que está ON (o cargando)
     const stopBtn = await page.$("#stop");
     
     await browser.close();
@@ -220,7 +202,7 @@ async function checkServerState() {
   } catch (err) {
     console.error("❌ Error en checkServerState:", err);
     if (browser) await browser.close();
-    return { status: "Error obteniendo estado", isOnline: false };
+    return { status: "Error/Bloqueado", isOnline: false };
   }
 }
 
@@ -229,51 +211,45 @@ client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
   try {
-    // FIX: Ejecutar deferReply inmediatamente para evitar el Unknown interaction (Error 10062)
+    // 1. Responder rápido para evitar error "Unknown interaction"
     await interaction.deferReply(); 
 
     switch (interaction.commandName) {
       case "estado":
-        await interaction.editReply("📡 **Intentando obtener estado...** (Esto toma unos segundos en verificar)");
+        await interaction.editReply("📡 Consultando Aternos...");
         const state = await checkServerState();
-        let emoji = state.status.toLowerCase().includes("offline") ? "🔴" : "🟢";
-        if (state.status.toLowerCase().includes("starting")) emoji = "⏳";
-        
-        await interaction.editReply(`📡 **Estado:** ${state.status} ${emoji}`);
+        await interaction.editReply(`📡 **Estado:** ${state.status}`);
         break;
 
       case "jugadores":
-        // Simulado
-        await interaction.editReply(`👥 **Jugadores:** ${players} (Solo visible si el servidor reporta query)`);
+        await interaction.editReply(`👥 **Jugadores:** ${players}`);
         break;
 
       case "start":
-        await interaction.editReply("🚀 **Intentando iniciar servidor...** (Esto toma unos segundos en verificar)");
-        const started = await startServer();
-        if (started) {
-            await interaction.editReply(`✅ **Comando enviado.** El servidor debería estar iniciándose.\nIP: \`${serverIP}\`\n*Espera unos minutos a que Aternos cargue.*`);
-        } else {
-            // CORRECCIÓN AQUÍ: Se reemplaza `)` por `"
-            await interaction.editReply("⚠️ **No pude iniciarlo.**\nPosibles causas:\n1. Ya está encendido.\n2. Hay cola de espera.\n3. Aternos pidió captcha (no puedo resolverlo)."); 
-        }
-        break;
+        await interaction.editReply("🚀 **Iniciando protocolo de arranque...** (Puede tardar 1-2 mins)");
+        const started = await startServer();
+        if (started) {
+            await interaction.editReply(`✅ **Comando aceptado.** Aternos está iniciando el servidor.\nIP: \`${serverIP}\``);
+        } else {
+            // SINTAXIS CORREGIDA AQUI:
+            await interaction.editReply("⚠️ **No pude iniciarlo.** Posibles causas:\n1. Ya está encendido.\n2. Bloqueo de seguridad de Aternos.");
+        }
+        break;
 
       case "stop":
-        await interaction.editReply("🛑 **Intentando apagar servidor...**");
+        await interaction.editReply("🛑 **Apagando...**");
         const stopped = await stopServer();
         if (stopped) {
-            await interaction.editReply("✅ **Comando enviado.** El servidor se está apagando.");
+            await interaction.editReply("✅ **Comando aceptado.** Apagando servidor.");
         } else {
-            await interaction.editReply("⚠️ **No pude apagarlo.** Probablemente ya esté apagado.");
+            await interaction.editReply("⚠️ **Error.** Ya está apagado o no se pudo acceder.");
         }
         break;
     }
   } catch (error) {
     console.error(error);
-    // Mostrar un error más específico usando el mensaje de error personalizado
-    await interaction.editReply(`❌ **Error crítico:** Algo falló al intentar conectar con Aternos.\nDetalles: ${error.message.substring(0, 100)}... Revisa la consola de Render.`);
+    await interaction.editReply(`❌ **Error:** ${error.message.substring(0, 100)}... Revisa Render.`);
   }
 });
 
-// -------------------- START --------------------
 client.login(process.env.TOKEN);
