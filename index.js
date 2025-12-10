@@ -8,11 +8,11 @@ import {
 import express from "express";
 import dotenv from "dotenv";
 
-// IMPORTANTE: Usamos la versión 'extra' para camuflaje
+// Importamos Puppeteer con modo Sigilo (Stealth)
 import puppeteer from "puppeteer-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
 
-// Activamos el camuflaje para engañar a Aternos/Cloudflare
+// Activamos el plugin de sigilo
 puppeteer.use(StealthPlugin());
 
 dotenv.config();
@@ -21,7 +21,7 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.get("/", (req, res) => res.send("Bot activo y escuchando correctamente."));
+app.get("/", (req, res) => res.send("Bot activo."));
 app.listen(PORT, () =>
   console.log(`Servidor web escuchando en puerto ${PORT}`)
 );
@@ -40,10 +40,10 @@ let players = "Desconocido";
 
 // -------------------- 3. SLASH COMMANDS --------------------
 const commands = [
-  new SlashCommandBuilder().setName("estado").setDescription("Muestra si el servidor está ON u OFF"),
-  new SlashCommandBuilder().setName("jugadores").setDescription("Muestra jugadores conectados"),
-  new SlashCommandBuilder().setName("start").setDescription("Inicia el servidor Aternos"),
-  new SlashCommandBuilder().setName("stop").setDescription("Apaga el servidor Aternos"),
+  new SlashCommandBuilder().setName("estado").setDescription("Ver estado del servidor"),
+  new SlashCommandBuilder().setName("jugadores").setDescription("Ver jugadores"),
+  new SlashCommandBuilder().setName("start").setDescription("Iniciar servidor Aternos"),
+  new SlashCommandBuilder().setName("stop").setDescription("Apagar servidor Aternos"),
 ];
 
 const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
@@ -54,7 +54,7 @@ const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
       Routes.applicationCommands(process.env.CLIENT_ID),
       { body: commands.map((c) => c.toJSON()) }
     );
-    console.log("✅ Comandos registrados en Discord!");
+    console.log("✅ Comandos registrados.");
   } catch (err) {
     console.error("❌ Error registrando comandos:", err);
   }
@@ -63,9 +63,9 @@ const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 // -------------------- 4. FUNCIONES PUPPETEER (SIGILO) --------------------
 
 async function launchBrowser() {
-  console.log("🚀 Lanzando navegador en modo SIGILO...");
+  console.log("🚀 Lanzando navegador (Stealth)...");
   return await puppeteer.launch({
-    headless: true, // Debe ser true en Render
+    headless: true, // true para producción en Render
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -79,7 +79,7 @@ async function launchBrowser() {
 }
 
 async function loginAternos(page) {
-  // 1. Disfrazar el User Agent (parecer un usuario de Windows)
+  // Disfrazar User Agent
   await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36');
   
   page.setDefaultNavigationTimeout(120000); 
@@ -87,34 +87,29 @@ async function loginAternos(page) {
   console.log("🔑 Navegando a Aternos...");
   await page.goto("https://aternos.org/go/", { waitUntil: "networkidle2" });
 
-  // Selectores actualizados
   const usernameSelector = "input.username"; 
   const passwordSelector = "input[type='password']"; 
   const submitButtonSelector = "#login button[type='submit']";
   
   try {
-    // Esperamos 60s. El plugin Stealth debería evitar el bloqueo inmediato
+    // Esperamos 60s
     await page.waitForSelector(usernameSelector, { visible: true, timeout: 60000 });
-    console.log("✅ Login detectado. Escribiendo credenciales...");
+    console.log("✅ Login detectado. Escribiendo...");
     
-    // Escribir lento (delay) para parecer humano
-    await page.type(usernameSelector, process.env.ATERNOS_EMAIL, { delay: 100 });
-    await page.type(passwordSelector, process.env.ATERNOS_PASSWORD, { delay: 100 });
+    await page.type(usernameSelector, process.env.ATERNOS_EMAIL, { delay: 75 });
+    await page.type(passwordSelector, process.env.ATERNOS_PASSWORD, { delay: 75 });
 
-    console.log("📤 Click en entrar...");
+    console.log("📤 Click entrar...");
     await page.click(submitButtonSelector);
 
   } catch (error) {
-    // Si falla, obtenemos el título para saber si nos bloquearon
     const pageTitle = await page.title();
-    throw new Error(`Fallo Login (60s). Título de la página: '${pageTitle}'. Aternos está bloqueando la conexión.`);
+    throw new Error(`Fallo Login. Título: '${pageTitle}'. Posible bloqueo Cloudflare.`);
   }
 
-  // Esperar a que cargue el dashboard
   await page.waitForNavigation({ waitUntil: "networkidle2" });
 
   console.log("🌐 Entrando al servidor...");
-  // Navegación directa al servidor específico
   await page.goto(`https://aternos.org/server/${process.env.SERVER_ID}/`, {
     waitUntil: "networkidle2",
   });
@@ -128,11 +123,10 @@ async function startServer() {
     const page = await browser.newPage();
     await loginAternos(page);
 
-    // Buscamos botón START
     const startBtn = await page.$("#start"); 
     
     if (!startBtn) {
-      console.log("⚠️ No veo el botón START (¿Ya encendido o selector cambió?).");
+      console.log("⚠️ No veo el botón START.");
       await browser.close();
       return false; 
     }
@@ -140,7 +134,6 @@ async function startServer() {
     console.log("✅ Clic en START");
     await startBtn.click();
 
-    // Confirmación de cola (A veces sale un popup)
     try {
         await page.waitForSelector("#confirm", { timeout: 5000 });
         console.log("⚠️ Cola detectada, confirmando...");
@@ -206,14 +199,21 @@ async function checkServerState() {
   }
 }
 
-// -------------------- 5. MANEJO DE INTERACCIONES --------------------
+// -------------------- 5. MANEJO DE INTERACCIONES (BLINDADO) --------------------
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
+  // PASO CRÍTICO 1: Intentar pausar la interacción inmediatamente.
+  // Si esto falla (por timeout), salimos de la función para no crashear el bot.
   try {
-    // 1. Responder rápido para evitar error "Unknown interaction"
-    await interaction.deferReply(); 
+      await interaction.deferReply();
+  } catch (error) {
+      console.error("⚠️ Error al hacer deferReply (Discord timeout):", error.message);
+      return; // Salimos para evitar el error InteractionNotReplied
+  }
 
+  // PASO 2: Ejecutar la lógica dentro de un try/catch separado
+  try {
     switch (interaction.commandName) {
       case "estado":
         await interaction.editReply("📡 Consultando Aternos...");
@@ -226,13 +226,12 @@ client.on("interactionCreate", async (interaction) => {
         break;
 
       case "start":
-        await interaction.editReply("🚀 **Iniciando protocolo de arranque...** (Puede tardar 1-2 mins)");
+        await interaction.editReply("🚀 **Iniciando protocolo...** (Paciencia, Render es lento)");
         const started = await startServer();
         if (started) {
-            await interaction.editReply(`✅ **Comando aceptado.** Aternos está iniciando el servidor.\nIP: \`${serverIP}\``);
+            await interaction.editReply(`✅ **Comando aceptado.** Aternos iniciando.\nIP: \`${serverIP}\``);
         } else {
-            // SINTAXIS CORREGIDA AQUI:
-            await interaction.editReply("⚠️ **No pude iniciarlo.** Posibles causas:\n1. Ya está encendido.\n2. Bloqueo de seguridad de Aternos.");
+            await interaction.editReply("⚠️ **No se pudo iniciar.** Puede que ya esté ON o Aternos bloqueó el acceso.");
         }
         break;
 
@@ -242,14 +241,22 @@ client.on("interactionCreate", async (interaction) => {
         if (stopped) {
             await interaction.editReply("✅ **Comando aceptado.** Apagando servidor.");
         } else {
-            await interaction.editReply("⚠️ **Error.** Ya está apagado o no se pudo acceder.");
+            await interaction.editReply("⚠️ **Error.** Ya está apagado o inaccesible.");
         }
         break;
     }
   } catch (error) {
-    console.error(error);
-    await interaction.editReply(`❌ **Error:** ${error.message.substring(0, 100)}... Revisa Render.`);
+    console.error("Error en la lógica del comando:", error);
+    // Solo intentamos editar la respuesta si la interacción sigue viva
+    if (interaction.deferred && !interaction.replied) {
+        await interaction.editReply(`❌ **Error:** ${error.message.substring(0, 100)}... Revisa Render.`);
+    }
   }
+});
+
+// Evitar que el bot muera por errores no manejados
+process.on('unhandledRejection', error => {
+	console.error('Unhandled promise rejection:', error);
 });
 
 client.login(process.env.TOKEN);
