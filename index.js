@@ -248,14 +248,15 @@ client.on("interactionCreate", async (interaction) => {
         break;
 
       case "start":
-        await interaction.editReply("🚀 **Intentando iniciar servidor...** (Esto toma unos segundos en verificar)");
-        const started = await startServer();
-        if (started) {
-            await interaction.editReply(`✅ **Comando enviado.** El servidor debería estar iniciándose.\nIP: \`${serverIP}\`\n*Espera unos minutos a que Aternos cargue.*`);
-        } else {
-            await interaction.editReply("⚠️ **No pude iniciarlo.**\nPosibles causas:\n1. Ya está encendido.\n2. Hay cola de espera.\n3. Aternos pidió captcha (no puedo resolverlo).`);
-        }
-        break;
+        await interaction.editReply("🚀 **Intentando iniciar servidor...** (Esto toma unos segundos en verificar)");
+        const started = await startServer();
+        if (started) {
+            await interaction.editReply(`✅ **Comando enviado.** El servidor debería estar iniciándose.\nIP: \`${serverIP}\`\n*Espera unos minutos a que Aternos cargue.*`);
+        } else {
+            // CORRECCIÓN AQUÍ: Se reemplaza `)` por `"
+            await interaction.editReply("⚠️ **No pude iniciarlo.**\nPosibles causas:\n1. Ya está encendido.\n2. Hay cola de espera.\n3. Aternos pidió captcha (no puedo resolverlo)."); 
+        }
+        break;
 
       case "stop":
         await interaction.editReply("🛑 **Intentando apagar servidor...**");
