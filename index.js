@@ -84,47 +84,50 @@ async function launchBrowser() {
   });
 }
 
-// Función común para loguearse (¡TIMEOUT A 60 SEGUNDOS Y MENSAJE DE ERROR MEJORADO!)
+// Función común para loguearse (¡SELECTORES ACTUALIZADOS DE ATERNOS!)
 async function loginAternos(page) {
-  // Timeout de 2 minutos para la navegación
-  page.setDefaultNavigationTimeout(120000); 
+    // Timeout de 2 minutos para la navegación
+    page.setDefaultNavigationTimeout(120000); 
 
-  console.log("🔑 Entrando al login de Aternos...");
-  await page.goto("https://aternos.org/go/", { waitUntil: "domcontentloaded" });
+    console.log("🔑 Entrando al login de Aternos...");
+    await page.goto("https://aternos.org/go/", { waitUntil: "domcontentloaded" });
 
-  // *** CORRECCIÓN DEL TIMEOUT: Esperamos 60 segundos por el formulario ***
-  const loginSelector = "#login input[name='username']";
-  
-  try {
-    // Aumentamos el timeout específico del selector a 60 segundos 
-    await page.waitForSelector(loginSelector, { 
-        visible: true, 
-        timeout: 60000 // ¡60 segundos!
+    // --- NUEVOS SELECTORES DE ATERNOS (Basado en la inspección de tu navegador) ---
+    const usernameSelector = "input.username"; 
+    const passwordSelector = "input[type='password']"; 
+    const submitButtonSelector = "#login button[type='submit']";
+    
+    try {
+        // Intentamos encontrar el nuevo campo de usuario con un tiempo de 60 segundos
+        await page.waitForSelector(usernameSelector, { 
+            visible: true, 
+            timeout: 60000 
+        });
+        
+        console.log("✅ Formulario encontrado. Logueando...");
+        
+        // Ingresando usuario y contraseña con los nuevos selectores
+        await page.type(usernameSelector, process.env.ATERNOS_EMAIL);
+        await page.type(passwordSelector, process.env.ATERNOS_PASSWORD);
+
+        console.log("📤 Enviando formulario...");
+        await page.click(submitButtonSelector);
+
+    } catch (error) {
+        // Si falla el selector ahora, es casi seguro un bloqueo de Captcha o un cambio adicional de Aternos.
+        throw new Error(`Fallo de Login: Timeout (60s). El selector '${usernameSelector}' no fue encontrado. Posible CAPTCHA.`);
+    }
+
+    // Esperar navegación post-login
+    await page.waitForNavigation({ waitUntil: "domcontentloaded" });
+
+    console.log("🌐 Navegando al panel del servidor...");
+    await page.goto(`https://aternos.org/server/${process.env.SERVER_ID}/`, {
+        waitUntil: "domcontentloaded",
     });
-    console.log("✅ Selector de login encontrado. Procediendo a loguear...");
-  } catch (error) {
-      // Lanzamos un error que muestra el nuevo timeout para confirmar que esta versión se ejecuta
-      throw new Error(`Timeout al buscar el formulario de Aternos (60s). El selector '${loginSelector}' no fue encontrado.`);
-  }
-
-  console.log("Ingresando credenciales...");
-  // Nota: Usamos process.env.ATERNOS_PASSWORD, asumiendo que corregiste la KEY en Render.
-  await page.type(loginSelector, process.env.ATERNOS_EMAIL);
-  await page.type("#login input[name='password']", process.env.ATERNOS_PASSWORD);
-
-  console.log("📤 Enviando formulario...");
-  await page.click("#login button[type='submit']");
-
-  // Esperar navegación post-login
-  await page.waitForNavigation({ waitUntil: "domcontentloaded" });
-
-  console.log("🌐 Navegando al panel del servidor...");
-  await page.goto(`https://aternos.org/server/${process.env.SERVER_ID}/`, {
-    waitUntil: "domcontentloaded",
-  });
-  
-  // Pequeña espera extra para asegurar carga de elementos dinámicos
-  await new Promise(r => setTimeout(r, 2000));
+    
+    // Pequeña espera extra
+    await new Promise(r => setTimeout(r, 2000));
 }
 
 
