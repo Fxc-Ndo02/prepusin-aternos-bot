@@ -84,12 +84,12 @@ async function launchBrowser() {
   });
 }
 
-// Función común para loguearse (¡TIMEOUT A 60 SEGUNDOS!)
+// Función común para loguearse (¡TIMEOUT A 60 SEGUNDOS Y MENSAJE DE ERROR MEJORADO!)
 async function loginAternos(page) {
   // Timeout de 2 minutos para la navegación
   page.setDefaultNavigationTimeout(120000); 
 
-  console.log("🔑 Entrando al login...");
+  console.log("🔑 Entrando al login de Aternos...");
   await page.goto("https://aternos.org/go/", { waitUntil: "domcontentloaded" });
 
   // *** CORRECCIÓN DEL TIMEOUT: Esperamos 60 segundos por el formulario ***
@@ -99,15 +99,16 @@ async function loginAternos(page) {
     // Aumentamos el timeout específico del selector a 60 segundos 
     await page.waitForSelector(loginSelector, { 
         visible: true, 
-        timeout: 60000 // A 60 segundos
+        timeout: 60000 // ¡60 segundos!
     });
     console.log("✅ Selector de login encontrado. Procediendo a loguear...");
   } catch (error) {
-      // Lanzamos un error que mostrará el nuevo timeout en caso de fallo
-      throw new Error(`Timeout al buscar el formulario de Aternos (60s): ${error.message}`);
+      // Lanzamos un error que muestra el nuevo timeout para confirmar que esta versión se ejecuta
+      throw new Error(`Timeout al buscar el formulario de Aternos (60s). El selector '${loginSelector}' no fue encontrado.`);
   }
 
   console.log("Ingresando credenciales...");
+  // Nota: Usamos process.env.ATERNOS_PASSWORD, asumiendo que corregiste la KEY en Render.
   await page.type(loginSelector, process.env.ATERNOS_EMAIL);
   await page.type("#login input[name='password']", process.env.ATERNOS_PASSWORD);
 
@@ -225,7 +226,7 @@ client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
   try {
-    // ESTA LÍNEA DEBE SER LA PRIMERA EN EL BLOQUE TRY para evitar el Unknown interaction
+    // FIX: Ejecutar deferReply inmediatamente para evitar el Unknown interaction (Error 10062)
     await interaction.deferReply(); 
 
     switch (interaction.commandName) {
@@ -249,7 +250,7 @@ client.on("interactionCreate", async (interaction) => {
         if (started) {
             await interaction.editReply(`✅ **Comando enviado.** El servidor debería estar iniciándose.\nIP: \`${serverIP}\`\n*Espera unos minutos a que Aternos cargue.*`);
         } else {
-            await interaction.editReply("⚠️ **No pude iniciarlo.**\nPosibles causas:\n1. Ya está encendido.\n2. Hay cola de espera.\n3. Aternos pidió captcha (no puedo resolverlo).");
+            await interaction.editReply("⚠️ **No pude iniciarlo.**\nPosibles causas:\n1. Ya está encendido.\n2. Hay cola de espera.\n3. Aternos pidió captcha (no puedo resolverlo).`);
         }
         break;
 
@@ -265,7 +266,7 @@ client.on("interactionCreate", async (interaction) => {
     }
   } catch (error) {
     console.error(error);
-    // Mostrar un error más específico para el usuario
+    // Mostrar un error más específico usando el mensaje de error personalizado
     await interaction.editReply(`❌ **Error crítico:** Algo falló al intentar conectar con Aternos.\nDetalles: ${error.message.substring(0, 100)}... Revisa la consola de Render.`);
   }
 });
