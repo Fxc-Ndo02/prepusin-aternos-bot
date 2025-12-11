@@ -60,7 +60,7 @@ const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
   }
 })();
 
-// -------------------- 4. FUNCIONES PUPPETEER (INYECCIÓN DE COOKIES) --------------------
+// -------------------- 4. FUNCIONES PUPPETEER (LOGIN AUTOMÁTICO) --------------------
 
 async function launchBrowser() {
   console.log("🚀 Lanzando navegador (Stealth)...");
@@ -78,35 +78,49 @@ async function launchBrowser() {
   });
 }
 
-// Función para cargar la sesión usando cookies (EVITA CLOUDFLARE)
-async function loadAternosSession(page) {
-    page.setDefaultNavigationTimeout(120000); 
+// Función de login restaurada y con tolerancia de tiempo
+async function loginAternos(page) {
+  // Disfrazar User Agent
+  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36');
+  
+  // Aumentar el timeout general de navegación
+  page.setDefaultNavigationTimeout(180000); // 3 minutos
 
-    if (!process.env.ATERNOS_SESSION || !process.env.ATERNOS_SERVER_COOKIE) {
-        throw new Error("ERROR: Variables de cookies no configuradas en Render.");
-    }
+  console.log("🔑 Navegando a Aternos para iniciar sesión...");
+  await page.goto("https://aternos.org/go/", { waitUntil: "networkidle2" });
 
-    console.log("🍪 Inyectando cookies de sesión...");
-
-    // Inyectamos las cookies copiadas para simular un usuario logueado
-    await page.setCookie(
-        { name: 'ATERNOS_SESSION', value: process.env.ATERNOS_SESSION, domain: 'aternos.org', path: '/', secure: true, httpOnly: true },
-        { name: 'ATERNOS_SERVER', value: process.env.ATERNOS_SERVER_COOKIE, domain: 'aternos.org', path: '/', secure: true, httpOnly: true },
-        { name: 'ATERNOS_LANGUAGE', value: process.env.ATERNOS_LANGUAGE || 'es-ES', domain: 'aternos.org', path: '/', secure: true, httpOnly: false }
-    );
-
-    console.log("🌐 Navegando directamente al panel del servidor...");
+  const usernameSelector = "input.username"; 
+  const passwordSelector = "input[type='password']"; 
+  const submitButtonSelector = "#login button[type='submit']";
+  
+  try {
+    // Esperamos hasta 120 segundos (2 minutos) para que Cloudflare termine su verificación
+    console.log("⏳ Esperando página de login o que Cloudflare termine (MAX 2 min)...");
+    await page.waitForSelector(usernameSelector, { visible: true, timeout: 120000 }); 
+    console.log("✅ Login detectado. Escribiendo credenciales...");
     
-    // Navegación directa al servidor, sin pasar por el login
-    await page.goto(`https://aternos.org/server/${process.env.SERVER_ID}/`, {
-        waitUntil: "networkidle2",
-    });
-    
-    const title = await page.title();
-    if (title.includes("Just a moment") || title.includes("Login")) {
-        // Si sigue apareciendo, es que las cookies expiraron.
-        throw new Error("BLOQUEO ACTIVO. Las cookies de sesión han expirado. Necesitas actualizarlas en Render.");
+    await page.type(usernameSelector, process.env.ATERNOS_EMAIL, { delay: 75 });
+    await page.type(passwordSelector, process.env.ATERNOS_PASSWORD, { delay: 75 });
+
+    console.log("📤 Click entrar...");
+    await page.click(submitButtonSelector);
+
+  } catch (error) {
+    const pageTitle = await page.title();
+    if (pageTitle.includes("Just a moment") || pageTitle.includes("Cloudflare")) {
+        // Error específico que indica que el tiempo de espera no fue suficiente
+        throw new Error(`Fallo: Cloudflare bloqueó la IP de Render (Título: '${pageTitle}').`);
     }
+    // Otro error de login
+    throw new Error(`Fallo Login. Título: '${pageTitle}'. Error: ${error.message}`);
+  }
+
+  await page.waitForNavigation({ waitUntil: "networkidle2" });
+
+  console.log("🌐 Entrando al servidor...");
+  await page.goto(`https://aternos.org/server/${process.env.SERVER_ID}/`, {
+    waitUntil: "networkidle2",
+  });
 }
 
 
@@ -116,7 +130,7 @@ async function startServer() {
   try {
     browser = await launchBrowser();
     const page = await browser.newPage();
-    await loadAternosSession(page);
+    await loginAternos(page); // LLAMADA RESTAURADA
 
     const startBtn = await page.$("#start"); 
     
@@ -150,7 +164,7 @@ async function stopServer() {
   try {
     browser = await launchBrowser();
     const page = await browser.newPage();
-    await loadAternosSession(page);
+    await loginAternos(page); // LLAMADA RESTAURADA
 
     const stopBtn = await page.$("#stop"); 
     
@@ -177,7 +191,7 @@ async function checkServerState() {
   try {
     browser = await launchBrowser();
     const page = await browser.newPage();
-    await loadAternosSession(page);
+    await loginAternos(page); // LLAMADA RESTAURADA
 
     const statusElement = await page.$(".server-status-label");
     let status = "Desconocido";
@@ -198,21 +212,20 @@ async function checkServerState() {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
-  // Paso 1: CONFIRMAR INMEDIATAMENTE la interacción (Optimización de velocidad)
-  // Usamos flags: 0 para evitar el warning 'ephemeral' y ganar velocidad.
+  // Paso 1: CONFIRMAR INMEDIATAMENTE la interacción
   try {
       await interaction.deferReply({ flags: 0 }); 
   } catch (error) {
-      // Ignoramos el error de timeout, ya que es un problema de velocidad de Render.
       console.error("⚠️ Error al hacer deferReply (Discord timeout, ignorado):", error.message);
       return; 
   }
 
   // Paso 2: Ejecutar la lógica pesada (Puppeteer)
   try {
+    await interaction.editReply("⏳ **Conectando...** Esto puede tardar hasta 2 minutos debido al servidor gratuito de Render.");
+
     switch (interaction.commandName) {
       case "estado":
-        await interaction.editReply("📡 Consultando Aternos...");
         const state = await checkServerState();
         await interaction.editReply(`📡 **Estado:** ${state.status}`);
         break;
@@ -222,17 +235,17 @@ client.on("interactionCreate", async (interaction) => {
         break;
 
       case "start":
-        await interaction.editReply("🚀 **Iniciando protocolo...** (El navegador de Render está cargando)");
+        await interaction.editReply("🚀 **Iniciando protocolo...** (Esperando login y carga de página)");
         const started = await startServer();
         if (started) {
             await interaction.editReply(`✅ **Comando aceptado.** Aternos iniciando.\nIP: \`${serverIP}\``);
         } else {
-            await interaction.editReply("⚠️ **No se pudo iniciar.** Puede que ya esté ON o la sesión expiró.");
+            await interaction.editReply("⚠️ **No se pudo iniciar.** Puede que ya esté ON.");
         }
         break;
 
       case "stop":
-        await interaction.editReply("🛑 **Apagando...**");
+        await interaction.editReply("🛑 **Apagando...** (Esperando login y carga de página)");
         const stopped = await stopServer();
         if (stopped) {
             await interaction.editReply("✅ **Comando aceptado.** Apagando servidor.");
@@ -245,10 +258,10 @@ client.on("interactionCreate", async (interaction) => {
     console.error("Error en la lógica del comando (Puppeteer):", error);
     
     if (interaction.deferred && !interaction.replied) {
-        // Reporta el error específico de cookies expiradas o bloqueo
-        const errorMessage = error.message.includes("BLOQUEO") || error.message.includes("expirado") ? 
-                             "❌ **Error Crítico:** Las cookies de sesión han expirado. Por favor, actualiza las variables en Render." :
-                             `❌ **Error:** ${error.message.substring(0, 100)}... Revisa Render.`;
+        // Reporta el error más probable: Bloqueo de Cloudflare.
+        const errorMessage = error.message.includes("Cloudflare") ? 
+                             "❌ **Error:** Falla en el login. Cloudflare bloqueó la IP de Render, intenta de nuevo en unos minutos." :
+                             `❌ **Error interno:** ${error.message.substring(0, 100)}... Revisa el log de Render.`;
                              
         await interaction.editReply(errorMessage);
     }
