@@ -88,7 +88,7 @@ async function loadAternosSession(page) {
 
     console.log("🍪 Inyectando cookies de sesión...");
 
-    // Inyectamos las cookies copiadas
+    // Inyectamos las cookies copiadas para simular un usuario logueado
     await page.setCookie(
         { name: 'ATERNOS_SESSION', value: process.env.ATERNOS_SESSION, domain: 'aternos.org', path: '/', secure: true, httpOnly: true },
         { name: 'ATERNOS_SERVER', value: process.env.ATERNOS_SERVER_COOKIE, domain: 'aternos.org', path: '/', secure: true, httpOnly: true },
@@ -97,12 +97,14 @@ async function loadAternosSession(page) {
 
     console.log("🌐 Navegando directamente al panel del servidor...");
     
+    // Navegación directa al servidor, sin pasar por el login
     await page.goto(`https://aternos.org/server/${process.env.SERVER_ID}/`, {
         waitUntil: "networkidle2",
     });
     
     const title = await page.title();
     if (title.includes("Just a moment") || title.includes("Login")) {
+        // Si sigue apareciendo, es que las cookies expiraron.
         throw new Error("BLOQUEO ACTIVO. Las cookies de sesión han expirado. Necesitas actualizarlas en Render.");
     }
 }
@@ -114,7 +116,7 @@ async function startServer() {
   try {
     browser = await launchBrowser();
     const page = await browser.newPage();
-    await loadAternosSession(page); // LLAMADA ACTUALIZADA
+    await loadAternosSession(page);
 
     const startBtn = await page.$("#start"); 
     
@@ -148,7 +150,7 @@ async function stopServer() {
   try {
     browser = await launchBrowser();
     const page = await browser.newPage();
-    await loadAternosSession(page); // LLAMADA ACTUALIZADA
+    await loadAternosSession(page);
 
     const stopBtn = await page.$("#stop"); 
     
@@ -175,7 +177,7 @@ async function checkServerState() {
   try {
     browser = await launchBrowser();
     const page = await browser.newPage();
-    await loadAternosSession(page); // LLAMADA ACTUALIZADA
+    await loadAternosSession(page);
 
     const statusElement = await page.$(".server-status-label");
     let status = "Desconocido";
@@ -197,12 +199,13 @@ client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
   // Paso 1: CONFIRMAR INMEDIATAMENTE la interacción (Optimización de velocidad)
+  // Usamos flags: 0 para evitar el warning 'ephemeral' y ganar velocidad.
   try {
-      // Intentamos deferir con un pequeño timeout para ganar tiempo.
-      await interaction.deferReply({ ephemeral: false, timeout: 1000 });
+      await interaction.deferReply({ flags: 0 }); 
   } catch (error) {
+      // Ignoramos el error de timeout, ya que es un problema de velocidad de Render.
       console.error("⚠️ Error al hacer deferReply (Discord timeout, ignorado):", error.message);
-      return; // Si falla la confirmación, no podemos responder. Salimos.
+      return; 
   }
 
   // Paso 2: Ejecutar la lógica pesada (Puppeteer)
@@ -242,7 +245,7 @@ client.on("interactionCreate", async (interaction) => {
     console.error("Error en la lógica del comando (Puppeteer):", error);
     
     if (interaction.deferred && !interaction.replied) {
-        // Manejo de errores que reporta si las cookies expiraron
+        // Reporta el error específico de cookies expiradas o bloqueo
         const errorMessage = error.message.includes("BLOQUEO") || error.message.includes("expirado") ? 
                              "❌ **Error Crítico:** Las cookies de sesión han expirado. Por favor, actualiza las variables en Render." :
                              `❌ **Error:** ${error.message.substring(0, 100)}... Revisa Render.`;
