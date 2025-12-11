@@ -60,7 +60,7 @@ const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
   }
 })();
 
-// -------------------- 4. FUNCIONES PUPPETEER (SIGILO) --------------------
+// -------------------- 4. FUNCIONES PUPPETEER (INYECCIÓN DE COOKIES) --------------------
 
 async function launchBrowser() {
   console.log("🚀 Lanzando navegador (Stealth)...");
@@ -73,47 +73,43 @@ async function launchBrowser() {
       "--disable-gpu",
       "--single-process",
       "--no-zygote",
-      "--window-size=1920,1080", // Ventana grande para parecer humano
+      "--window-size=1920,1080", 
     ],
   });
 }
 
-async function loginAternos(page) {
-  // Disfrazar User Agent
-  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36');
-  
-  page.setDefaultNavigationTimeout(120000); 
+// Función para cargar la sesión usando cookies (REEMPLAZA loginAternos)
+async function loadAternosSession(page) {
+    page.setDefaultNavigationTimeout(120000); 
 
-  console.log("🔑 Navegando a Aternos...");
-  await page.goto("https://aternos.org/go/", { waitUntil: "networkidle2" });
+    // Verificación de variables de entorno
+    if (!process.env.ATERNOS_SESSION || !process.env.ATERNOS_SERVER_COOKIE) {
+        throw new Error("ERROR CRÍTICO: Las variables ATERNOS_SESSION o ATERNOS_SERVER_COOKIE no están configuradas en Render.");
+    }
 
-  const usernameSelector = "input.username"; 
-  const passwordSelector = "input[type='password']"; 
-  const submitButtonSelector = "#login button[type='submit']";
-  
-  try {
-    // Esperamos 60s
-    await page.waitForSelector(usernameSelector, { visible: true, timeout: 60000 });
-    console.log("✅ Login detectado. Escribiendo...");
+    console.log("🍪 Inyectando cookies de sesión...");
+
+    // Inyectamos las cookies copiadas para saltar el login de Aternos/Cloudflare
+    await page.setCookie(
+        { name: 'ATERNOS_SESSION', value: process.env.ATERNOS_SESSION, domain: 'aternos.org', path: '/', secure: true, httpOnly: true },
+        { name: 'ATERNOS_SERVER', value: process.env.ATERNOS_SERVER_COOKIE, domain: 'aternos.org', path: '/', secure: true, httpOnly: true },
+        { name: 'ATERNOS_LANGUAGE', value: process.env.ATERNOS_LANGUAGE || 'es-ES', domain: 'aternos.org', path: '/', secure: true, httpOnly: false }
+    );
+
+    console.log("🌐 Navegando directamente al panel del servidor...");
     
-    await page.type(usernameSelector, process.env.ATERNOS_EMAIL, { delay: 75 });
-    await page.type(passwordSelector, process.env.ATERNOS_PASSWORD, { delay: 75 });
-
-    console.log("📤 Click entrar...");
-    await page.click(submitButtonSelector);
-
-  } catch (error) {
-    const pageTitle = await page.title();
-    throw new Error(`Fallo Login. Título: '${pageTitle}'. Posible bloqueo Cloudflare.`);
-  }
-
-  await page.waitForNavigation({ waitUntil: "networkidle2" });
-
-  console.log("🌐 Entrando al servidor...");
-  await page.goto(`https://aternos.org/server/${process.env.SERVER_ID}/`, {
-    waitUntil: "networkidle2",
-  });
+    // Navegación directa al servidor, sin pasar por el login
+    await page.goto(`https://aternos.org/server/${process.env.SERVER_ID}/`, {
+        waitUntil: "networkidle2",
+    });
+    
+    const title = await page.title();
+    if (title.includes("Just a moment") || title.includes("Login")) {
+        // Si sigue apareciendo, es que las cookies expiraron.
+        throw new Error("BLOQUEO ACTIVO. Las cookies de sesión han expirado. Necesitas actualizarlas en Render.");
+    }
 }
+
 
 // Acción: START
 async function startServer() {
@@ -121,7 +117,7 @@ async function startServer() {
   try {
     browser = await launchBrowser();
     const page = await browser.newPage();
-    await loginAternos(page);
+    await loadAternosSession(page); // LLAMADA ACTUALIZADA
 
     const startBtn = await page.$("#start"); 
     
@@ -155,7 +151,7 @@ async function stopServer() {
   try {
     browser = await launchBrowser();
     const page = await browser.newPage();
-    await loginAternos(page);
+    await loadAternosSession(page); // LLAMADA ACTUALIZADA
 
     const stopBtn = await page.$("#stop"); 
     
@@ -182,7 +178,7 @@ async function checkServerState() {
   try {
     browser = await launchBrowser();
     const page = await browser.newPage();
-    await loginAternos(page);
+    await loadAternosSession(page); // LLAMADA ACTUALIZADA
 
     const statusElement = await page.$(".server-status-label");
     let status = "Desconocido";
@@ -203,16 +199,13 @@ async function checkServerState() {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
-  // PASO CRÍTICO 1: Intentar pausar la interacción inmediatamente.
-  // Si esto falla (por timeout), salimos de la función para no crashear el bot.
   try {
       await interaction.deferReply();
   } catch (error) {
-      console.error("⚠️ Error al hacer deferReply (Discord timeout):", error.message);
-      return; // Salimos para evitar el error InteractionNotReplied
+      console.error("⚠️ Error al hacer deferReply:", error.message);
+      return; 
   }
 
-  // PASO 2: Ejecutar la lógica dentro de un try/catch separado
   try {
     switch (interaction.commandName) {
       case "estado":
@@ -231,7 +224,7 @@ client.on("interactionCreate", async (interaction) => {
         if (started) {
             await interaction.editReply(`✅ **Comando aceptado.** Aternos iniciando.\nIP: \`${serverIP}\``);
         } else {
-            await interaction.editReply("⚠️ **No se pudo iniciar.** Puede que ya esté ON o Aternos bloqueó el acceso.");
+            await interaction.editReply("⚠️ **No se pudo iniciar.** Puede que ya esté ON o la sesión expiró.");
         }
         break;
 
@@ -247,14 +240,17 @@ client.on("interactionCreate", async (interaction) => {
     }
   } catch (error) {
     console.error("Error en la lógica del comando:", error);
-    // Solo intentamos editar la respuesta si la interacción sigue viva
     if (interaction.deferred && !interaction.replied) {
-        await interaction.editReply(`❌ **Error:** ${error.message.substring(0, 100)}... Revisa Render.`);
+        // Reporta el error específico de cookies expiradas si ocurre
+        const errorMessage = error.message.includes("expirado") || error.message.includes("BLOQUEO") ? 
+                             "❌ **Error Crítico:** Las cookies de sesión han expirado. Por favor, actualiza las variables en Render." :
+                             `❌ **Error:** ${error.message.substring(0, 100)}... Revisa Render.`;
+                             
+        await interaction.editReply(errorMessage);
     }
   }
 });
 
-// Evitar que el bot muera por errores no manejados
 process.on('unhandledRejection', error => {
 	console.error('Unhandled promise rejection:', error);
 });
