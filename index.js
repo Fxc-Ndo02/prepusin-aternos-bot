@@ -78,18 +78,17 @@ async function launchBrowser() {
   });
 }
 
-// Función para cargar la sesión usando cookies (REEMPLAZA loginAternos)
+// Función para cargar la sesión usando cookies (EVITA CLOUDFLARE)
 async function loadAternosSession(page) {
     page.setDefaultNavigationTimeout(120000); 
 
-    // Verificación de variables de entorno
     if (!process.env.ATERNOS_SESSION || !process.env.ATERNOS_SERVER_COOKIE) {
-        throw new Error("ERROR CRÍTICO: Las variables ATERNOS_SESSION o ATERNOS_SERVER_COOKIE no están configuradas en Render.");
+        throw new Error("ERROR: Variables de cookies no configuradas en Render.");
     }
 
     console.log("🍪 Inyectando cookies de sesión...");
 
-    // Inyectamos las cookies copiadas para saltar el login de Aternos/Cloudflare
+    // Inyectamos las cookies copiadas
     await page.setCookie(
         { name: 'ATERNOS_SESSION', value: process.env.ATERNOS_SESSION, domain: 'aternos.org', path: '/', secure: true, httpOnly: true },
         { name: 'ATERNOS_SERVER', value: process.env.ATERNOS_SERVER_COOKIE, domain: 'aternos.org', path: '/', secure: true, httpOnly: true },
@@ -98,14 +97,12 @@ async function loadAternosSession(page) {
 
     console.log("🌐 Navegando directamente al panel del servidor...");
     
-    // Navegación directa al servidor, sin pasar por el login
     await page.goto(`https://aternos.org/server/${process.env.SERVER_ID}/`, {
         waitUntil: "networkidle2",
     });
     
     const title = await page.title();
     if (title.includes("Just a moment") || title.includes("Login")) {
-        // Si sigue apareciendo, es que las cookies expiraron.
         throw new Error("BLOQUEO ACTIVO. Las cookies de sesión han expirado. Necesitas actualizarlas en Render.");
     }
 }
@@ -195,17 +192,20 @@ async function checkServerState() {
   }
 }
 
-// -------------------- 5. MANEJO DE INTERACCIONES (BLINDADO) --------------------
+// -------------------- 5. MANEJO DE INTERACCIONES (BLINDADO Y OPTIMIZADO) --------------------
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
+  // Paso 1: CONFIRMAR INMEDIATAMENTE la interacción (Optimización de velocidad)
   try {
-      await interaction.deferReply();
+      // Intentamos deferir con un pequeño timeout para ganar tiempo.
+      await interaction.deferReply({ ephemeral: false, timeout: 1000 });
   } catch (error) {
-      console.error("⚠️ Error al hacer deferReply:", error.message);
-      return; 
+      console.error("⚠️ Error al hacer deferReply (Discord timeout, ignorado):", error.message);
+      return; // Si falla la confirmación, no podemos responder. Salimos.
   }
 
+  // Paso 2: Ejecutar la lógica pesada (Puppeteer)
   try {
     switch (interaction.commandName) {
       case "estado":
@@ -219,7 +219,7 @@ client.on("interactionCreate", async (interaction) => {
         break;
 
       case "start":
-        await interaction.editReply("🚀 **Iniciando protocolo...** (Paciencia, Render es lento)");
+        await interaction.editReply("🚀 **Iniciando protocolo...** (El navegador de Render está cargando)");
         const started = await startServer();
         if (started) {
             await interaction.editReply(`✅ **Comando aceptado.** Aternos iniciando.\nIP: \`${serverIP}\``);
@@ -239,10 +239,11 @@ client.on("interactionCreate", async (interaction) => {
         break;
     }
   } catch (error) {
-    console.error("Error en la lógica del comando:", error);
+    console.error("Error en la lógica del comando (Puppeteer):", error);
+    
     if (interaction.deferred && !interaction.replied) {
-        // Reporta el error específico de cookies expiradas si ocurre
-        const errorMessage = error.message.includes("expirado") || error.message.includes("BLOQUEO") ? 
+        // Manejo de errores que reporta si las cookies expiraron
+        const errorMessage = error.message.includes("BLOQUEO") || error.message.includes("expirado") ? 
                              "❌ **Error Crítico:** Las cookies de sesión han expirado. Por favor, actualiza las variables en Render." :
                              `❌ **Error:** ${error.message.substring(0, 100)}... Revisa Render.`;
                              
@@ -251,8 +252,9 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
+// Evitar que el bot muera por errores no manejados
 process.on('unhandledRejection', error => {
-	console.error('Unhandled promise rejection:', error);
+	console.error('Unhandled promise rejection (Bot no crashea):', error);
 });
 
 client.login(process.env.TOKEN);
